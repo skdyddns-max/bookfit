@@ -49,7 +49,7 @@ function renderHome() {
     <header class="home-head">
       <span class="kicker">${dateKicker()}</span>
       <h1>${logoSvg()}<em>${BRAND.name}</em></h1>
-      <p class="tagline">${streak > 0 ? `🔥 ${streak}일 연속 운동 중이에요!` : '오늘도 가볍게 한 세트 시작해볼까요?'}</p>
+      <p class="tagline">${streak > 0 ? `🔥 ${streak}일 연속 인증 중이에요!` : '오늘도 몸과 마음, 둘 다 챙겨볼까요? 💪📖'}</p>
     </header>
     <div class="stat-row">
       <div class="mini-stat"><i>🏋️</i><b data-count="${state.sessions.length}">0</b><span>총 운동</span></div>
@@ -933,21 +933,20 @@ function myCertCard(sum) {
   const today = todayStr();
   const cells = sum.days.map((d, i) => {
     const editable = d.date <= today;
-    const cert = d.secs > 0 || d.photo;
-    const val = fmtHM(d.secs) || (d.photo ? '📷' : (editable ? '＋' : '·'));
+    const exOn = d.exSecs > 0 || d.exPhoto, rdOn = d.readSecs > 0 || d.readPhoto, cert = exOn || rdOn;
     return `<div class="cg-cell ${cert ? 'on' : ''} ${editable ? 'edit' : 'future'}" ${editable ? `data-day="${d.date}"` : ''}>
-      ${d.photo ? '<i class="cg-cam">📷</i>' : ''}<span class="${i >= 5 ? 'we' : ''}">${dow[i]}</span><b>${val}</b></div>`;
+      <span class="cg-dow ${i >= 5 ? 'we' : ''}">${dow[i]}</span>
+      <span class="cg-tk ${exOn ? 'on' : ''}">💪</span><span class="cg-tk ${rdOn ? 'on' : ''}">📖</span></div>`;
   }).join('');
   const badge = sum.done ? '<span class="cert-badge done">달성 ✓</span>' : '<span class="cert-badge miss">미달성</span>';
-  const pct = Math.min(100, Math.round(sum.workoutDays / sum.goal * 100));
   return `<div class="cert-card">
     <div class="cert-head"><b>${esc(state.profile.nick || '나')}</b>${badge}</div>
     <div class="cg-grid">${cells}</div>
-    <p class="cg-tip">🖐️ 요일을 눌러 <b>바로 인증</b>! (운동시간만 톡 입력)</p>
+    <p class="cg-tip">🖐️ 요일을 눌러 <b>운동·독서 인증</b>! (시간만 톡, 사진 선택)</p>
     <div class="cert-metrics">
-      <div><span>운동횟수</span><b data-count="${sum.workoutDays}">0</b><small>/${sum.goal}회</small></div>
-      <div><span>운동시간</span><b>${fmtHM(sum.totalSecs) || '0:00'}</b></div>
-      <div><span>달성률</span><b data-count="${pct}" data-suf="%">0</b></div>
+      <div><span>💪 운동</span><b data-count="${sum.exDays}">0</b><small>일 · ${fmtHM(sum.totalEx) || '0:00'}</small></div>
+      <div><span>📖 독서</span><b data-count="${sum.readDays}">0</b><small>일 · ${fmtHM(sum.totalRead) || '0:00'}</small></div>
+      <div><span>인증</span><b data-count="${sum.certDays}">0</b><small>/${sum.goal}일</small></div>
     </div></div>`;
 }
 
@@ -967,10 +966,10 @@ function compressImage(file) {
   });
 }
 /* Supabase Storage에 사진 업로드 → 공개 URL */
-async function uploadDayPhoto(blob, ds) {
+async function uploadDayPhoto(blob, ds, kind) {
   if (typeof SUPABASE_CONFIG === 'undefined' || !SUPABASE_CONFIG.url) throw new Error('no-supabase');
   const code = (state.challenge && state.challenge.code) || 'solo';
-  const path = `${code}/${deviceId()}/${ds}.jpg`;
+  const path = `${code}/${deviceId()}/${ds}-${kind || 'ex'}.jpg`;
   const res = await fetch(`${SUPABASE_CONFIG.url}/storage/v1/object/repbloom-photos/${path}`, {
     method: 'POST',
     headers: { apikey: SUPABASE_CONFIG.anonKey, Authorization: `Bearer ${SUPABASE_CONFIG.anonKey}`, 'Content-Type': 'image/jpeg', 'x-upsert': 'true' },
@@ -980,57 +979,63 @@ async function uploadDayPhoto(blob, ds) {
   return `${SUPABASE_CONFIG.url}/storage/v1/object/public/repbloom-photos/${path}?t=${Date.now()}`;
 }
 
-/* 빠른 인증 — 요일 탭 → 운동시간 + (선택)사진 */
+/* 빠른 인증 — 요일 탭 → 운동 + 독서 (각 시간 + 선택 사진) */
 function openQuickDay(ds) {
   const m = document.querySelector('#quickday');
   const d = new Date(ds), wd = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
-  const cur = (state.manualDays && state.manualDays[ds]) || 0;
-  const curPhoto = (state.dayPhotos && state.dayPhotos[ds]) || null;
-  const presets = [[30, '30분'], [45, '45분'], [60, '1시간'], [90, '1시간 30분'], [120, '2시간']];
-  let picked = null, removePhoto = false, busy = false;
+  const curEx = (state.manualDays && state.manualDays[ds]) || 0, curExP = (state.dayPhotos && state.dayPhotos[ds]) || null;
+  const curRd = (state.readDays && state.readDays[ds]) || 0, curRdP = (state.readPhotos && state.readPhotos[ds]) || null;
+  const exPre = [[30, '30분'], [45, '45분'], [60, '1시간'], [90, '1시간반'], [120, '2시간']];
+  const rdPre = [[15, '15분'], [30, '30분'], [45, '45분'], [60, '1시간'], [90, '1시간반']];
+  let pEx = null, rmEx = false, pRd = null, rmRd = false, busy = false;
   m.querySelector('.modal-head h3').textContent = `${d.getMonth() + 1}월 ${d.getDate()}일 (${wd}) 인증`;
+  const sect = (kind, ic, title, cur, curP, pre, pk, rm) => {
+    const shown = rm ? null : (pk ? URL.createObjectURL(pk) : curP);
+    return `<div class="qd-sect">
+      <h4 class="qd-h">${ic} ${title}</h4>
+      <div class="qd-presets">${pre.map(p => `<button class="qd-chip ${cur === p[0] * 60 ? 'on' : ''}" data-kind="${kind}" data-min="${p[0]}">${p[1]}</button>`).join('')}</div>
+      <label>직접 입력 (분)<input id="qd-${kind}-min" type="number" inputmode="numeric" placeholder="예: 30" value="${cur ? Math.round(cur / 60) : ''}"></label>
+      <div class="qd-photo">${shown ? `<div class="qd-thumb"><img src="${shown}" alt=""><button data-del="${kind}" type="button">✕ 사진 삭제</button></div>` : `<button data-pbtn="${kind}" type="button" class="qd-photobtn">📷 사진 인증 추가 <small>(선택)</small></button>`}
+        <input id="qd-${kind}-file" type="file" accept="image/*" capture="environment" hidden></div>
+    </div>`;
+  };
   const draw = () => {
-    const shownPhoto = removePhoto ? null : (picked ? URL.createObjectURL(picked) : curPhoto);
     m.querySelector('#qd-body').innerHTML = `
-      <p class="qd-guide">이 날 운동한 시간을 눌러 인증하세요. <b>사진을 올리면 순위 +1점 🔥</b></p>
-      <div class="qd-presets">${presets.map(p => `<button class="qd-chip ${cur === p[0] * 60 ? 'on' : ''}" data-min="${p[0]}">${p[1]}</button>`).join('')}</div>
-      <label>직접 입력 (분)<input id="qd-custom" type="number" inputmode="numeric" placeholder="예: 75" value="${cur ? Math.round(cur / 60) : ''}"></label>
-      <div class="qd-photo">
-        ${shownPhoto ? `<div class="qd-thumb"><img src="${shownPhoto}" alt="인증 사진"><button id="qd-photodel" type="button">✕ 사진 삭제</button></div>`
-          : `<button id="qd-photobtn" type="button" class="qd-photobtn">📷 사진 인증 추가 <small>(선택)</small></button>`}
-        <input id="qd-file" type="file" accept="image/*" capture="environment" hidden>
-      </div>
-      <button id="qd-save" class="big-btn">${busy ? '올리는 중…' : '인증하기'}</button>
-      ${(cur || curPhoto) ? '<button id="qd-clear" class="text-btn danger">이 날 인증 전체 지우기</button>' : ''}`;
-    m.querySelectorAll('.qd-chip').forEach(b => b.addEventListener('click', () => doSave(+b.dataset.min)));
-    m.querySelector('#qd-save').addEventListener('click', () => doSave(parseInt(m.querySelector('#qd-custom').value) || 0));
-    m.querySelector('#qd-clear')?.addEventListener('click', () => clearDay());
-    m.querySelector('#qd-photobtn')?.addEventListener('click', () => m.querySelector('#qd-file').click());
-    m.querySelector('#qd-photodel')?.addEventListener('click', () => { picked = null; removePhoto = true; draw(); });
-    m.querySelector('#qd-file').addEventListener('change', e => { if (e.target.files[0]) { picked = e.target.files[0]; removePhoto = false; draw(); } });
+      <p class="qd-guide">오늘 <b>운동</b>과 <b>독서</b>를 인증하세요. 둘 다 하면 순위 UP 🔥 사진 올리면 +1점!</p>
+      ${sect('ex', '💪', '오늘 운동', curEx, curExP, exPre, pEx, rmEx)}
+      ${sect('rd', '📖', '오늘 독서', curRd, curRdP, rdPre, pRd, rmRd)}
+      <button id="qd-save" class="big-btn">${busy ? '저장 중…' : '인증하기'}</button>
+      ${(curEx || curExP || curRd || curRdP) ? '<button id="qd-clear" class="text-btn danger">이 날 인증 전체 지우기</button>' : ''}`;
+    m.querySelectorAll('.qd-chip').forEach(b => b.addEventListener('click', () => {
+      m.querySelector('#qd-' + b.dataset.kind + '-min').value = b.dataset.min;
+      m.querySelectorAll('.qd-chip[data-kind="' + b.dataset.kind + '"]').forEach(x => x.classList.toggle('on', x === b));
+    }));
+    m.querySelectorAll('[data-pbtn]').forEach(b => b.addEventListener('click', () => m.querySelector('#qd-' + b.dataset.pbtn + '-file').click()));
+    m.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => { if (b.dataset.del === 'ex') { pEx = null; rmEx = true; } else { pRd = null; rmRd = true; } draw(); }));
+    m.querySelector('#qd-ex-file').addEventListener('change', e => { if (e.target.files[0]) { pEx = e.target.files[0]; rmEx = false; draw(); } });
+    m.querySelector('#qd-rd-file').addEventListener('change', e => { if (e.target.files[0]) { pRd = e.target.files[0]; rmRd = false; draw(); } });
+    m.querySelector('#qd-save').addEventListener('click', doSave);
+    m.querySelector('#qd-clear')?.addEventListener('click', clearDay);
   };
-  const applyPhoto = async () => {
-    if (removePhoto) { if (state.dayPhotos) delete state.dayPhotos[ds]; return; }
-    if (!picked) return;
-    const blob = await compressImage(picked);
-    const url = await uploadDayPhoto(blob, ds);
-    if (!state.dayPhotos) state.dayPhotos = {};
-    state.dayPhotos[ds] = url;
+  const applyPhoto = async (pk, rm, kind, store) => {
+    if (rm) { if (state[store]) delete state[store][ds]; return; }
+    if (!pk) return;
+    const blob = await compressImage(pk); const url = await uploadDayPhoto(blob, ds, kind);
+    if (!state[store]) state[store] = {}; state[store][ds] = url;
   };
-  const doSave = async mins => {
-    if (busy) return;
-    busy = true; draw();
-    try { await applyPhoto(); }
+  const doSave = async () => {
+    if (busy) return; busy = true; draw();
+    try { await applyPhoto(pEx, rmEx, 'ex', 'dayPhotos'); await applyPhoto(pRd, rmRd, 'rd', 'readPhotos'); }
     catch (e) { busy = false; draw(); alert('사진 업로드에 실패했어요. 잠시 후 다시 시도해주세요.\n(' + (e.message || e) + ')'); return; }
-    if (!state.manualDays) state.manualDays = {};
-    if (mins > 0) state.manualDays[ds] = mins * 60; else delete state.manualDays[ds];
-    saveState(); closeModal('#quickday'); renderChallenge();
-    toast('인증 완료! 💪');
+    const exMin = parseInt(m.querySelector('#qd-ex-min').value) || 0, rdMin = parseInt(m.querySelector('#qd-rd-min').value) || 0;
+    if (!state.manualDays) state.manualDays = {}; if (!state.readDays) state.readDays = {};
+    if (exMin > 0) state.manualDays[ds] = exMin * 60; else delete state.manualDays[ds];
+    if (rdMin > 0) state.readDays[ds] = rdMin * 60; else delete state.readDays[ds];
+    saveState(); closeModal('#quickday'); renderChallenge(); toast('인증 완료! 🔥');
   };
   const clearDay = () => {
-    if (!confirm('이 날 인증(시간·사진)을 모두 지울까요?')) return;
-    if (state.manualDays) delete state.manualDays[ds];
-    if (state.dayPhotos) delete state.dayPhotos[ds];
+    if (!confirm('이 날 인증(운동·독서·사진)을 모두 지울까요?')) return;
+    ['manualDays', 'dayPhotos', 'readDays', 'readPhotos'].forEach(k => { if (state[k]) delete state[k][ds]; });
     saveState(); closeModal('#quickday'); renderChallenge(); toast('인증을 지웠어요');
   };
   draw(); openModal('#quickday');
@@ -1042,7 +1047,10 @@ function collectWeekPhotos(ms) {
   const dow = ['월', '화', '수', '목', '금', '토', '일'];
   const rows = challengeBoard(ms);
   const out = [];
-  rows.forEach(r => r.days.forEach((d, i) => { if (d.photo) out.push({ url: d.photo, nick: r.nick || '익명', day: dow[i] }); }));
+  rows.forEach(r => r.days.forEach((d, i) => {
+    if (d.exPhoto) out.push({ url: d.exPhoto, nick: r.nick || '익명', day: dow[i] + ' 💪운동' });
+    if (d.readPhoto) out.push({ url: d.readPhoto, nick: r.nick || '익명', day: dow[i] + ' 📖독서' });
+  }));
   return out;
 }
 function openPhoto(url) {
@@ -1098,35 +1106,40 @@ function attSheet(rows) {
   const dow = ['월', '화', '수', '목', '금', '토', '일'];
   const head = `<tr><th class="att-name">멤버</th>${dow.map((d, i) => `<th class="${i >= 5 ? 'we' : ''}">${d}</th>`).join('')}<th class="att-sum">합계</th></tr>`;
   const body = rows.map(r => {
-    const meta = [r.region, r.gender, r.age && r.age + '세'].filter(Boolean).join('·');
+    const meta = [r.region, r.gender].filter(Boolean).join('·');
+    const cell = (v, ph, ic, cls) => `<span class="${v || ph ? cls : 'off'}">${ic}${v ? fmtHM(v) : (ph ? '📷' : '·')}</span>`;
     const cells = r.days.map(d => {
-      if (d.photo) return `<td class="att-cell has ph" data-photo="${d.photo}"><img src="${d.photo}" loading="lazy" alt=""><span>${fmtHM(d.secs) || '📷'}</span></td>`;
-      if (d.secs) return `<td class="att-cell has"><span>${fmtHM(d.secs)}</span></td>`;
-      return `<td class="att-cell"></td>`;
+      const exOn = d.exSecs > 0 || d.exPhoto, rdOn = d.readSecs > 0 || d.readPhoto, anyPhoto = d.exPhoto || d.readPhoto;
+      if (!exOn && !rdOn) return `<td class="att-cell"></td>`;
+      return `<td class="att-cell has ${anyPhoto ? 'ph' : ''}" ${anyPhoto ? `data-photo="${d.exPhoto || d.readPhoto}"` : ''}>
+        <div class="att2">${cell(d.exSecs, d.exPhoto, '💪', 'ex')}${cell(d.readSecs, d.readPhoto, '📖', 'rd')}</div></td>`;
     }).join('');
-    return `<tr class="${r.isMe ? 'me' : ''}"><td class="att-name"><b>${esc(r.nick || '익명')}</b>${meta ? `<small>${esc(meta)}</small>` : ''}</td>${cells}<td class="att-sum"><b>${r.cnt}회</b><small>${fmtHM(r.total) || '0:00'}</small>${r.photoCnt ? `<i>📷${r.photoCnt}</i>` : ''}</td></tr>`;
+    return `<tr class="${r.isMe ? 'me' : ''}"><td class="att-name"><b>${esc(r.nick || '익명')}</b>${meta ? `<small>${esc(meta)}</small>` : ''}</td>${cells}<td class="att-sum"><b>${r.certDays}일</b><small>💪${r.exDays}·📖${r.readDays}</small>${r.photoCnt ? `<i>📷${r.photoCnt}</i>` : ''}</td></tr>`;
   }).join('');
   return `<div class="att-wrap"><table class="att"><thead>${head}</thead><tbody>${body}</tbody></table></div>
-    <p class="lb-legend">📷 사진을 눌러 크게 보기 · <b>사진 올리면 그 날 출석 + 순위 +1점</b></p>`;
+    <p class="lb-legend">💪운동 📖독서 · 📷 있는 칸을 눌러 사진 보기 · <b>둘 다 하면 순위 UP</b></p>`;
 }
 
-/* 리더보드 행 계산: 멤버별 주간 요약 + 점수(운동일+사진) 랭크 */
+/* 리더보드 행 계산: 멤버별 운동+독서 요약 + 점수 랭크 */
 function challengeBoard(ms) {
   let members = [];
   if (chMembers) members = chMembers.map(m => ({ ...(m.data || {}), isMe: m.member === deviceId() }));
-  if (!members.some(x => x.isMe)) members.unshift({ nick: state.profile.nick || '나', region: state.profile.region, age: state.profile.age, gender: state.profile.gender, dayTimes: dayTimeMap(), photos: state.dayPhotos || {}, isMe: true });
+  if (!members.some(x => x.isMe)) members.unshift({ nick: state.profile.nick || '나', region: state.profile.region, age: state.profile.age, gender: state.profile.gender, dayTimes: dayTimeMap(), photos: state.dayPhotos || {}, readTimes: readTimeMap(), readPhotos: state.readPhotos || {}, isMe: true });
   const goal = state.settings.weeklyGoal || 3;
   const rows = members.map(m => {
-    const days = []; let total = 0, cnt = 0, photoCnt = 0, lastPhoto = null;
-    const ph = m.photos || {};
+    const days = []; let total = 0, exDays = 0, readDays = 0, certDays = 0, photoCnt = 0, lastPhoto = null;
+    const exT = m.dayTimes || {}, exP = m.photos || {}, rdT = m.readTimes || {}, rdP = m.readPhotos || {};
     for (let i = 0; i < 7; i++) {
       const d = new Date(ms); d.setDate(d.getDate() + i); const ds = todayStr(d);
-      const s = (m.dayTimes || {})[ds] || 0, p = ph[ds] || null;
-      days.push({ secs: s, photo: p });
-      if (s > 0 || p) { cnt++; total += s; }
-      if (p) { photoCnt++; lastPhoto = p; }
+      const es = exT[ds] || 0, ep = exP[ds] || null, rs = rdT[ds] || 0, rp = rdP[ds] || null;
+      days.push({ exSecs: es, exPhoto: ep, readSecs: rs, readPhoto: rp });
+      const exd = es > 0 || ep, rdd = rs > 0 || rp;
+      if (exd) exDays++; if (rdd) readDays++; if (exd || rdd) certDays++;
+      total += es + rs;
+      if (ep) { photoCnt++; lastPhoto = ep; } if (rp) { photoCnt++; lastPhoto = rp; }
     }
-    return { ...m, days, cnt, total, photoCnt, lastPhoto, score: cnt + photoCnt, done: cnt >= goal };
+    const score = exDays + readDays + photoCnt;
+    return { ...m, days, exDays, readDays, certDays, cnt: certDays, total, photoCnt, lastPhoto, score, done: certDays >= goal };
   });
   rows.sort((a, b) => b.score - a.score || b.total - a.total);
   let rank = 0, prev = null;
@@ -1134,14 +1147,14 @@ function challengeBoard(ms) {
   return rows;
 }
 function lbRow(r) {
-  const meta = [r.region, r.gender, r.age && r.age + '세'].filter(Boolean).join(' · ');
-  const dots = r.days.map(d => `<i class="${d.secs || d.photo ? 'on' : ''} ${d.photo ? 'ph' : ''}"></i>`).join('');
+  const meta = [r.region, r.gender].filter(Boolean).join(' · ');
+  const dots = r.days.map(d => `<i class="${d.exSecs || d.exPhoto || d.readSecs || d.readPhoto ? 'on' : ''}"></i>`).join('');
   const cam = r.photoCnt ? `📷${r.photoCnt} · ` : '';
   return `<div class="lb-row ${r.isMe ? 'me' : ''} ${r.photoCnt ? 'haspic' : ''}" ${r.photoCnt ? `data-photo="${r.lastPhoto}"` : ''}>
     <span class="lb-rank ${r.rank <= 3 ? 'top' : ''}">${r.rank}</span>
-    <div class="lb-info"><b>${esc(r.nick || '익명')}</b>${meta ? `<small>${esc(meta)}</small>` : ''}</div>
+    <div class="lb-info"><b>${esc(r.nick || '익명')}</b><small>💪${r.exDays} · 📖${r.readDays}${meta ? ` · ${esc(meta)}` : ''}</small></div>
     <div class="lb-week">${dots}</div>
-    <div class="lb-stat"><b>${r.cnt}회</b><small>${cam}${fmtHM(r.total) || '0:00'}</small></div>
+    <div class="lb-stat"><b>${r.certDays}일</b><small>${cam}${fmtHM(r.total) || '0:00'}</small></div>
     <span class="cert-badge sm ${r.done ? 'done' : 'miss'}">${r.done ? '✓' : '–'}</span></div>`;
 }
 
@@ -1333,14 +1346,20 @@ function dateLabel() {
   const w = ['일','월','화','수','목','금','토'][d.getDay()];
   return `${d.getMonth() + 1}월 ${d.getDate()}일 (${w})`;
 }
-/* 갈라진 케틀벨 로고 (SVG 인라인) */
+/* 북핏 로고 — 덤벨 + 펼친 책 (SVG 인라인) */
 function logoSvg(cls) {
   return `<svg class="brand-logo ${cls || ''}" viewBox="0 0 100 100" aria-hidden="true">
-    <defs><linearGradient id="kb-grad" x1="0" y1="0" x2="1" y2="1">
+    <defs><linearGradient id="bf-grad" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#FF6242"/><stop offset="1" stop-color="#FF9E6B"/></linearGradient></defs>
-    <path d="M30 47 Q30 14 50 14 Q70 14 70 47" fill="none" stroke="url(#kb-grad)" stroke-width="12" stroke-linecap="round"/>
-    <circle cx="50" cy="66" r="30" fill="url(#kb-grad)"/>
-    <path d="M50 38 L42 55 L56 61 L44 79 L52 96" fill="none" stroke="var(--bg)" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/>
+    <g fill="url(#bf-grad)">
+      <rect x="38" y="17" width="24" height="8" rx="4"/>
+      <rect x="29" y="11" width="9" height="20" rx="3"/>
+      <rect x="62" y="11" width="9" height="20" rx="3"/>
+    </g>
+    <path d="M50 85 L16 73 L16 41 L50 51 Z" fill="url(#bf-grad)"/>
+    <path d="M50 85 L84 73 L84 41 L50 51 Z" fill="url(#bf-grad)" opacity="0.7"/>
+    <path d="M50 51 L50 85" stroke="var(--bg)" stroke-width="4"/>
+    <path d="M23 51 L43 57 M23 61 L43 67 M57 57 L77 51 M57 67 L77 61" stroke="var(--bg)" stroke-width="2.5" opacity="0.5" fill="none"/>
   </svg>`;
 }
 function dateKicker() {
@@ -1432,14 +1451,14 @@ function showWelcome() {
   const m = document.querySelector('#welcome');
   m.querySelector('#wc-body').innerHTML = `
     <div class="wc-hero">
-      <span class="wc-emoji">💪</span>
-      <h2>운동뿌시기에 오신 걸 환영해요!</h2>
-      <p>운동을 기록하고, 성장을 눈으로 확인하고,<br>친구들과 함께 인증하는 앱이에요.</p>
+      <span class="wc-emoji">📚</span>
+      <h2>북핏에 오신 걸 환영해요!</h2>
+      <p>몸(운동)과 마음(독서)을 매일 인증하고,<br>친구들과 함께 습관을 만드는 앱이에요.</p>
     </div>
     <div class="wc-steps">
-      <div class="wc-step"><span class="wc-num">1</span><div><b>운동 시작하기</b><span>홈에서 버튼을 눌러 운동을 골라요</span></div><span class="wc-ic">🏋️</span></div>
-      <div class="wc-step"><span class="wc-num">2</span><div><b>세트마다 체크</b><span>무게·횟수 입력 후 오른쪽 체크를 탭!</span></div><span class="wc-ic">✅</span></div>
-      <div class="wc-step"><span class="wc-num">3</span><div><b>기록·통계·챌린지</b><span>성장 그래프와 친구 인증까지</span></div><span class="wc-ic">🏅</span></div>
+      <div class="wc-step"><span class="wc-num">1</span><div><b>챌린지 탭에서 인증</b><span>요일을 눌러 오늘 운동·독서 시간을 톡!</span></div><span class="wc-ic">🗓️</span></div>
+      <div class="wc-step"><span class="wc-num">2</span><div><b>사진 인증</b><span>운동·책 사진 올리면 순위 +1점 🔥</span></div><span class="wc-ic">📷</span></div>
+      <div class="wc-step"><span class="wc-num">3</span><div><b>출석부·리더보드</b><span>둘 다 챙긴 사람이 위로! 서로 확인해요</span></div><span class="wc-ic">🏅</span></div>
     </div>
     <button id="wc-start" class="big-btn">시작하기</button>
     <button id="wc-help" class="text-btn">📖 사용법 자세히 보기</button>`;
@@ -1456,23 +1475,22 @@ function openHelp() {
   const sec = (ic, title, body) => `<div class="help-sec"><h3><span class="help-ic">${ic}</span>${title}</h3>${body}</div>`;
   const step = arr => `<ol class="help-steps">${arr.map(s => `<li>${s}</li>`).join('')}</ol>`;
   m.querySelector('#help-body').innerHTML = `
-    <p class="help-lead">운동뿌시기, 이렇게 쓰면 돼요! 1분이면 익혀요 👇</p>
+    <p class="help-lead">북핏 = <b>몸(운동) + 마음(독서)</b> 매일 인증! 1분이면 익혀요 👇</p>
     ${sec('📲', '앱 설치 (한 번만)', `<p>브라우저에서 아래 <b>공유 버튼</b> → <b>"홈 화면에 추가"</b> 하면 앱처럼 아이콘이 생겨요. 매번 주소 안 쳐도 돼요.</p>`)}
-    ${sec('🏋️', '운동 기록하기', step([
-      '홈에서 <b>＋ 운동 시작하기</b>',
-      '<b>＋ 운동 추가</b> → 부위 고르고 운동 선택',
-      '무게·횟수 입력 → 세트 끝나면 오른쪽 <b>체크(✓)</b> 탭 (휴식 타이머 자동!)',
-      '다 하면 오른쪽 위 <b>완료</b>'
+    ${sec('🗓️', '매일 인증하기 (핵심!)', step([
+      '<b>챌린지 탭</b>에서 <b>요일 칸을 눌러요</b>',
+      '<b>💪 오늘 운동</b> 시간 입력 (+사진)',
+      '<b>📖 오늘 독서</b> 시간 입력 (+사진)',
+      '<b>인증하기</b> → 출석부·순위에 바로 반영!'
     ]))}
-    ${sec('✅', '간편 인증 (시간만 톡!)', `<p>세트 기록이 귀찮으면 — <b>챌린지 탭</b>에서 <b>요일 칸을 눌러</b> 그날 운동시간만 입력해도 인증돼요. 사진도 함께 올릴 수 있어요.</p>`)}
     ${sec('🏅', '그룹 챌린지 (친구랑 같이)', step([
       '<b>챌린지 탭</b> → 프로필(닉네임) 설정',
-      '받은 <b>코드</b>를 "참여"에 입력 (또는 "챌린지 만들기"로 코드 생성)',
-      '요일 눌러 <b>시간 + 사진</b>으로 인증',
-      '<b>리더보드</b>(순위)와 <b>출석부</b>(전체 표)에서 서로 확인!'
+      '받은 <b>코드</b>를 "참여"에 입력 (또는 "챌린지 만들기")',
+      '매일 운동·독서 인증',
+      '<b>리더보드</b>(순위)·<b>출석부</b>(전체 표)로 서로 확인!'
     ]))}
-    ${sec('📷', '사진 인증 = 순위 UP', `<p>인증할 때 <b>사진</b>을 올리면 <b>순위 +1점</b> 🔥 올린 사진은 <b>출석부</b>에 썸네일로 뜨고, 아무 사진이나 누르면 <b>모두의 인증 사진</b>을 넘겨볼 수 있어요.</p>`)}
-    ${sec('📊', '통계·기록', `<p><b>통계 탭</b>에서 성장 그래프·개인기록(PR)·근육 히트맵을, <b>기록 탭</b>에서 달력으로 지난 운동을 볼 수 있어요.</p>`)}
+    ${sec('📷', '사진 인증 = 순위 UP', `<p>운동·책 <b>사진</b>을 올리면 <b>순위 +1점</b> 🔥 <b>운동 + 독서 둘 다</b> 하면 점수가 더 올라가요. 아무 사진이나 누르면 <b>모두의 인증 사진</b>을 갤러리로 넘겨볼 수 있어요.</p>`)}
+    ${sec('🏋️', '운동 상세 기록 (선택)', `<p>세트·무게까지 자세히 남기고 싶으면 <b>오늘 탭</b>에서 운동을 기록하세요. <b>통계 탭</b>에 성장 그래프·PR이 쌓여요.</p>`)}
     ${sec('❓', '자주 묻는 질문', `
       <p><b>Q. 기록이 사라지나요?</b><br>이 기기에 자동 저장돼요. 챌린지에 참여하면 그룹 기록도 클라우드에 동기화됩니다.</p>
       <p><b>Q. 인터넷 없어도 되나요?</b><br>내 운동 기록은 오프라인에서도 돼요. 그룹 챌린지·사진만 인터넷이 필요해요.</p>

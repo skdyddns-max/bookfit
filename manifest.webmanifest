@@ -1,7 +1,7 @@
 {
-  "name": "운동뿌시기 — 운동 기록",
-  "short_name": "운동뿌시기",
-  "description": "세트·무게·횟수를 빠르게 기록하는 운동 일지 · 그룹 인증 챌린지",
+  "name": "북핏 — 운동+독서 습관",
+  "short_name": "북핏",
+  "description": "몸(운동)과 마음(독서)을 매일 인증하는 습관 챌린지",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

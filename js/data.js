@@ -110,8 +110,10 @@ function emptyState() {
     routines: [],          // [{id, name, exIds:[...]}]
     sessions: [],          // [{id, date, start, end, secs, entries:[{exId,name,part,type,sets:[{w,r,done,t}]}], note}]
     body: [],              // [{id, date, weight, chest, waist, arm, thigh, note}] (미사용)
-    manualDays: {},        // 빠른 인증: {'YYYY-MM-DD': secs} — 세트 없이 시간만 입력
-    dayPhotos: {},         // 사진 인증: {'YYYY-MM-DD': 공개URL} — 순위 +1점
+    manualDays: {},        // 운동 인증: {'YYYY-MM-DD': secs}
+    dayPhotos: {},         // 운동 사진: {'YYYY-MM-DD': 공개URL}
+    readDays: {},          // 독서 인증: {'YYYY-MM-DD': secs}
+    readPhotos: {},        // 독서 사진: {'YYYY-MM-DD': 공개URL}
     onboarded: false,      // 첫 사용 온보딩 완료 여부
     settings: { restDefault: 90, weeklyGoal: 3 },
     // account: {code, lastSync}    // 개인 기기 동기화 (sync.js)
@@ -256,30 +258,40 @@ function dayTimeMap() {
   Object.keys(man).forEach(d => { m[d] = Math.max(m[d] || 0, man[d] || 0); });
   return m;
 }
-/* 특정 주(월요일 시작)의 내 인증 요약 */
-function myWeekSummary(weekStartDate, map) {
-  map = map || dayTimeMap();
-  const photos = state.dayPhotos || {};
+/* 독서 시간 맵 */
+function readTimeMap() { return Object.assign({}, state.readDays || {}); }
+/* 특정 주(월요일 시작)의 내 인증 요약 — 운동 + 독서 */
+function myWeekSummary(weekStartDate, exMap, readMap) {
+  exMap = exMap || dayTimeMap();
+  readMap = readMap || readTimeMap();
+  const exPh = state.dayPhotos || {}, rdPh = state.readPhotos || {};
   const ms = weekStartDate || mondayStart();
   const days = [];
-  for (let i = 0; i < 7; i++) { const d = new Date(ms); d.setDate(d.getDate() + i); const ds = todayStr(d); days.push({ date: ds, secs: map[ds] || 0, photo: photos[ds] || null }); }
-  const workoutDays = days.filter(d => d.secs > 0 || d.photo).length;  // 시간 또는 사진이 있으면 인증일
-  const photoDays = days.filter(d => d.photo).length;
-  const totalSecs = days.reduce((a, d) => a + d.secs, 0);
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(ms); d.setDate(d.getDate() + i); const ds = todayStr(d);
+    days.push({ date: ds, exSecs: exMap[ds] || 0, exPhoto: exPh[ds] || null, readSecs: readMap[ds] || 0, readPhoto: rdPh[ds] || null });
+  }
+  const exDays = days.filter(d => d.exSecs > 0 || d.exPhoto).length;
+  const readDays = days.filter(d => d.readSecs > 0 || d.readPhoto).length;
+  const certDays = days.filter(d => d.exSecs > 0 || d.exPhoto || d.readSecs > 0 || d.readPhoto).length;
+  const exPhotos = days.filter(d => d.exPhoto).length, readPhotos = days.filter(d => d.readPhoto).length;
+  const totalEx = days.reduce((a, d) => a + d.exSecs, 0), totalRead = days.reduce((a, d) => a + d.readSecs, 0);
   const goal = state.settings.weeklyGoal || 3;
-  return { start: todayStr(ms), days, workoutDays, photoDays, totalSecs, goal, done: workoutDays >= goal, score: workoutDays + photoDays };
+  const score = exDays + readDays + exPhotos + readPhotos;  // 둘 다 하면 점수 UP
+  return {
+    start: todayStr(ms), days, exDays, readDays, certDays, exPhotos, readPhotos, totalEx, totalRead, goal,
+    done: certDays >= goal, score,
+    // 하위호환
+    workoutDays: certDays, photoDays: exPhotos + readPhotos, totalSecs: totalEx + totalRead
+  };
 }
-/* 최근 N주치 날짜→초 (챌린지 푸시용, 가벼운 요약) */
-function recentDayTimes(weeks) {
-  const map = dayTimeMap(), out = {};
-  const cut = mondayStart(); cut.setDate(cut.getDate() - 7 * ((weeks || 8) - 1));
-  Object.keys(map).forEach(ds => { if (new Date(ds) >= cut) out[ds] = map[ds]; });
+/* 최근 N주치 (챌린지 푸시용) */
+function recentMap(src, weeks) {
+  const out = {}; const cut = mondayStart(); cut.setDate(cut.getDate() - 7 * ((weeks || 8) - 1));
+  Object.keys(src).forEach(ds => { if (new Date(ds) >= cut) out[ds] = src[ds]; });
   return out;
 }
-/* 최근 N주치 사진 URL (챌린지 푸시용) */
-function recentDayPhotos(weeks) {
-  const p = state.dayPhotos || {}, out = {};
-  const cut = mondayStart(); cut.setDate(cut.getDate() - 7 * ((weeks || 8) - 1));
-  Object.keys(p).forEach(ds => { if (new Date(ds) >= cut) out[ds] = p[ds]; });
-  return out;
-}
+function recentDayTimes(weeks) { return recentMap(dayTimeMap(), weeks); }
+function recentDayPhotos(weeks) { return recentMap(state.dayPhotos || {}, weeks); }
+function recentReadTimes(weeks) { return recentMap(readTimeMap(), weeks); }
+function recentReadPhotos(weeks) { return recentMap(state.readPhotos || {}, weeks); }

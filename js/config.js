@@ -7,4 +7,4 @@ const SUPABASE_CONFIG = {
 };
 
 /* 앱 이름/브랜드 — 여기만 바꾸면 앱 전체 이름이 바뀝니다 */
-const BRAND = { name: '운동뿌시기', en: '운동뿌시기', emoji: '💪' };
+const BRAND = { name: '북핏', en: 'BookFit', emoji: '📚' };

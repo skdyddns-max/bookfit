@@ -153,7 +153,7 @@ function challengeJoined() { return !!(state.challenge && state.challenge.code);
 function chUrl(q) { return `${SUPABASE_CONFIG.url}/rest/v1/repbloom_challenge${q}`; }
 function myChallengeData() {
   const p = state.profile;
-  return { nick: p.nick || '나', region: p.region || '', age: p.age || '', gender: p.gender || '', dayTimes: recentDayTimes(8), photos: recentDayPhotos(8) };
+  return { nick: p.nick || '나', region: p.region || '', age: p.age || '', gender: p.gender || '', dayTimes: recentDayTimes(8), photos: recentDayPhotos(8), readTimes: recentReadTimes(8), readPhotos: recentReadPhotos(8) };
 }
 async function challengePush() {
   if (!challengeJoined() || !challengeReady()) return;
