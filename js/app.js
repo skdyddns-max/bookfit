@@ -1241,7 +1241,7 @@ function renderSettings() {
   const pmeta = [p.region, p.gender, p.age && p.age + '세'].filter(Boolean).join(' · ');
   el.innerHTML = `
     <header class="tab-head"><div class="th-left"><span class="kicker">Settings</span><h2>설정</h2></div></header>
-    <button id="s-help" class="help-btn">📖 사용법 · 도움말 보기<span>운동뿌시기 쓰는 법이 궁금하면 여기!</span></button>
+    <button id="s-help" class="help-btn">📖 사용법 · 도움말 보기<span>북핏(운동+독서) 쓰는 법이 궁금하면 여기!</span></button>
     <div class="set-group">
       <div class="set-item">내 프로필
         <button id="s-profile" class="pill-btn ghost">${p.nick ? esc(p.nick) + (pmeta ? ` · ${esc(pmeta)}` : '') : '설정하기'}</button>
@@ -1426,7 +1426,7 @@ function toast(msg) {
 /* ===== 초기화 ===== */
 const APP_VER = '1.0.0';
 function init() {
-  document.title = `${BRAND.name} — 운동 기록`;
+  document.title = `${BRAND.name} — 운동+독서 습관`;
   document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
   // 모달 닫기
   document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => closeModal(b.dataset.close)));
